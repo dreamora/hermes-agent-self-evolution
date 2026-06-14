@@ -27,6 +27,7 @@ from evolution.skills.skill_module import (
     SkillModule,
     load_skill_bundle,
     find_skill,
+    preserve_reference_mentions,
     reassemble_skill,
 )
 
@@ -202,6 +203,7 @@ def evolve(
     # ── 6. Extract evolved skill text ───────────────────────────────────
     # The optimized module's instructions contain the evolved skill text
     evolved_body = optimized_module.skill_text
+    evolved_body = preserve_reference_mentions(evolved_body, skill["raw"])
     evolved_full = reassemble_skill(skill["frontmatter"], evolved_body)
 
     # ── 7. Validate evolved skill ───────────────────────────────────────

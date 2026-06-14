@@ -7,6 +7,7 @@ from evolution.skills.skill_module import (
     discover_reference_files,
     load_skill,
     load_skill_bundle,
+    preserve_reference_mentions,
     reassemble_skill,
 )
 
@@ -96,6 +97,30 @@ class TestReassembleSkill:
 
         assert "EVOLVED" in result
         assert "New and improved" in result
+
+
+class TestPreserveReferenceMentions:
+    def test_appends_missing_references(self):
+        baseline = (
+            "# Skill\n"
+            "Use references/playbook.md and [template](templates/output.md)."
+        )
+        evolved = "# Skill\nImproved instructions."
+
+        result = preserve_reference_mentions(evolved, baseline)
+
+        assert "## Referenced Files" in result
+        assert "`references/playbook.md`" in result
+        assert "`templates/output.md`" in result
+
+    def test_does_not_duplicate_existing_references(self):
+        baseline = "# Skill\nUse references/playbook.md."
+        evolved = "# Skill\nStill use references/playbook.md."
+
+        result = preserve_reference_mentions(evolved, baseline)
+
+        assert "## Referenced Files" not in result
+        assert result == evolved
 
 
 class TestLoadSkillBundle:

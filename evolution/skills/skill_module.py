@@ -263,3 +263,36 @@ def reassemble_skill(frontmatter: str, evolved_body: str) -> str:
     and replaces only the body with the evolved version.
     """
     return f"---\n{frontmatter}\n---\n\n{evolved_body}\n"
+
+
+def preserve_reference_mentions(evolved_body: str, baseline_text: str) -> str:
+    """Ensure evolved skill body keeps baseline referenced-file mentions."""
+    baseline_refs = _reference_mentions(baseline_text)
+    if not baseline_refs:
+        return evolved_body
+
+    evolved_refs = _reference_mentions(evolved_body)
+    missing = [ref for ref in baseline_refs if ref not in evolved_refs]
+    if not missing:
+        return evolved_body
+
+    section = ["## Referenced Files", ""]
+    section.extend(f"- `{ref}`" for ref in missing)
+    return evolved_body.rstrip() + "\n\n" + "\n".join(section) + "\n"
+
+
+def _reference_mentions(text: str) -> list[str]:
+    refs = []
+    seen = set()
+    patterns = [
+        r"\]\(([^)]+\.md)(?:#[^)]+)?\)",
+        r"(?<![\w./-])((?:references|templates)/[^\s)]+\.md)",
+        r"(?<![\w./-])(SPEC\.md)",
+    ]
+    for pattern in patterns:
+        for match in re.findall(pattern, text):
+            ref = match.split("#", 1)[0].strip()
+            if ref not in seen:
+                seen.add(ref)
+                refs.append(ref)
+    return refs
