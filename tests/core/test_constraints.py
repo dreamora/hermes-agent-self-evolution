@@ -49,6 +49,19 @@ class TestGrowthConstraints:
         result = validator._check_growth(evolved, baseline, "skill")
         assert result.passed
 
+    def test_excessive_shrinkage_fails(self, validator):
+        baseline = "x" * 1000
+        evolved = "x" * 500
+        result = validator._check_shrinkage(evolved, baseline, "skill")
+        assert not result.passed
+
+    def test_growth_is_not_reported_as_negative_shrinkage(self, validator):
+        baseline = "x" * 1000
+        evolved = "x" * 1400
+        result = validator._check_shrinkage(evolved, baseline, "skill")
+        assert result.passed
+        assert "+0.0%" in result.message
+
 
 class TestNonEmpty:
     def test_non_empty_passes(self, validator):
@@ -96,3 +109,35 @@ class TestValidateAll:
         results = validator.validate_all("", "skill")
         failed = [r for r in results if not r.passed]
         assert len(failed) > 0
+
+    def test_reference_mentions_must_be_preserved(self, validator):
+        baseline = (
+            "---\nname: test\ndescription: Test skill\n---\n\n"
+            "# Procedure\nRead [playbook](references/playbook.md).\n"
+            "## Steps\nDo thing"
+        )
+        evolved = (
+            "---\nname: test\ndescription: Test skill\n---\n\n"
+            "# Procedure\nUse the playbook.\n"
+            "## Steps\nDo thing"
+        )
+
+        results = validator.validate_all(evolved, "skill", baseline_text=baseline)
+        failed = {r.constraint_name for r in results if not r.passed}
+
+        assert "reference_retention" in failed
+
+    def test_reference_mentions_pass_when_preserved(self, validator):
+        baseline = (
+            "---\nname: test\ndescription: Test skill\n---\n\n"
+            "# Procedure\nRead references/playbook.md.\n"
+            "## Steps\nDo thing"
+        )
+        evolved = (
+            "---\nname: test\ndescription: Test skill\n---\n\n"
+            "# Procedure\nStill read references/playbook.md.\n"
+            "## Steps\nDo thing"
+        )
+
+        results = validator.validate_all(evolved, "skill", baseline_text=baseline)
+        assert all(r.passed for r in results)

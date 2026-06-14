@@ -5,6 +5,7 @@ considered valid. Failed constraints = immediate rejection.
 """
 
 import subprocess
+import re
 from pathlib import Path
 from dataclasses import dataclass
 from typing import Optional
@@ -42,6 +43,7 @@ class ConstraintValidator:
         # 2. Growth limit (if baseline provided)
         if baseline_text:
             results.append(self._check_growth(artifact_text, baseline_text, artifact_type))
+            results.append(self._check_shrinkage(artifact_text, baseline_text, artifact_type))
 
         # 3. Non-empty
         results.append(self._check_non_empty(artifact_text))
@@ -49,6 +51,9 @@ class ConstraintValidator:
         # 4. Structural integrity
         if artifact_type == "skill":
             results.append(self._check_skill_structure(artifact_text))
+            if baseline_text:
+                results.append(self._check_heading_retention(artifact_text, baseline_text))
+                results.append(self._check_reference_retention(artifact_text, baseline_text))
 
         return results
 
@@ -133,6 +138,23 @@ class ConstraintValidator:
                 message=f"Growth exceeded: {growth:+.1%} (max {max_growth:+.1%})",
             )
 
+    def _check_shrinkage(self, text: str, baseline: str, artifact_type: str) -> ConstraintResult:
+        shrinkage = max(0.0, (len(baseline) - len(text)) / max(1, len(baseline)))
+        max_shrink = self.config.max_prompt_shrink
+
+        if shrinkage <= max_shrink:
+            return ConstraintResult(
+                passed=True,
+                constraint_name="shrinkage_limit",
+                message=f"Shrinkage OK: {shrinkage:+.1%} (max {max_shrink:+.1%})",
+            )
+        else:
+            return ConstraintResult(
+                passed=False,
+                constraint_name="shrinkage_limit",
+                message=f"Shrinkage exceeded: {shrinkage:+.1%} (max {max_shrink:+.1%})",
+            )
+
     def _check_non_empty(self, text: str) -> ConstraintResult:
         if text.strip():
             return ConstraintResult(
@@ -172,3 +194,78 @@ class ConstraintValidator:
                 constraint_name="skill_structure",
                 message=f"Skill missing: {', '.join(missing)}",
             )
+
+    def _check_heading_retention(self, text: str, baseline: str) -> ConstraintResult:
+        baseline_headings = _markdown_headings(baseline)
+        if not baseline_headings:
+            return ConstraintResult(
+                passed=True,
+                constraint_name="heading_retention",
+                message="No baseline headings to preserve",
+            )
+
+        headings = set(_markdown_headings(text))
+        kept = [heading for heading in baseline_headings if heading in headings]
+        retention = len(kept) / len(baseline_headings)
+        minimum = self.config.min_heading_retention
+
+        if retention >= minimum:
+            return ConstraintResult(
+                passed=True,
+                constraint_name="heading_retention",
+                message=f"Heading retention OK: {retention:.1%} (min {minimum:.1%})",
+            )
+        else:
+            missing = [heading for heading in baseline_headings if heading not in headings][:5]
+            return ConstraintResult(
+                passed=False,
+                constraint_name="heading_retention",
+                message=f"Heading retention too low: {retention:.1%} (min {minimum:.1%})",
+                details="Missing headings: " + ", ".join(missing),
+            )
+
+    def _check_reference_retention(self, text: str, baseline: str) -> ConstraintResult:
+        baseline_refs = _referenced_markdown_paths(baseline)
+        if not baseline_refs:
+            return ConstraintResult(
+                passed=True,
+                constraint_name="reference_retention",
+                message="No baseline reference links to preserve",
+            )
+
+        refs = _referenced_markdown_paths(text)
+        missing = sorted(baseline_refs - refs)
+        if not missing:
+            return ConstraintResult(
+                passed=True,
+                constraint_name="reference_retention",
+                message=f"Preserved {len(baseline_refs)} referenced file mentions",
+            )
+        return ConstraintResult(
+            passed=False,
+            constraint_name="reference_retention",
+            message=f"Missing {len(missing)} referenced file mention(s)",
+            details="Missing references: " + ", ".join(missing[:5]),
+        )
+
+
+def _markdown_headings(text: str) -> list[str]:
+    headings = []
+    for line in text.splitlines():
+        match = re.match(r"^\s{0,3}#{1,6}\s+(.+?)\s*$", line)
+        if match:
+            headings.append(re.sub(r"\s+", " ", match.group(1)).strip().lower())
+    return headings
+
+
+def _referenced_markdown_paths(text: str) -> set[str]:
+    refs = set()
+    patterns = [
+        r"\]\(([^)]+\.md)(?:#[^)]+)?\)",
+        r"(?<![\w./-])((?:references|templates)/[^\s)]+\.md)",
+        r"(?<![\w./-])(SPEC\.md)",
+    ]
+    for pattern in patterns:
+        for match in re.findall(pattern, text):
+            refs.add(match.split("#", 1)[0].strip())
+    return refs

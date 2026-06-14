@@ -96,14 +96,27 @@ class SyntheticDatasetBuilder:
     class GenerateTestCases(dspy.Signature):
         """Generate realistic evaluation test cases for an agent skill or tool.
 
-        Given the full text of a skill/tool description, generate diverse test cases
-        that would exercise different aspects of the skill. Each test case should include:
+        Given the full text of a skill/tool description and optional read-only
+        reference context, generate diverse test cases
+        that would exercise different aspects of the skill. These tests must protect
+        the specific identity of the skill, not just generic task success.
+
+        Include cases that check:
+        - the skill's named domain, audience, vocabulary, and operating stance
+        - required workflow steps and decision criteria from the skill
+        - anti-goals: things the skill explicitly says not to do
+        - regression risks where a shorter generic skill would seem plausible but wrong
+        - edge cases from the skill's own examples, headings, or constraints
+
+        Each test case should include:
         - A realistic task_input (what a user would actually ask)
-        - An expected_behavior rubric (what a good response should contain/do, NOT exact text)
+        - An expected_behavior rubric that names the specific skill concepts that
+          must appear or be followed, and what omissions should be penalized
         - A difficulty level (easy, medium, hard)
         - A category (what aspect of the skill this tests)
         """
         artifact_text: str = dspy.InputField(desc="The full text of the skill/tool/prompt being tested")
+        reference_context: str = dspy.InputField(desc="Read-only referenced files that support the skill")
         artifact_type: str = dspy.InputField(desc="Type: 'skill', 'tool_description', or 'prompt_section'")
         num_cases: int = dspy.InputField(desc="Number of test cases to generate")
         test_cases: str = dspy.OutputField(desc="JSON array of test cases, each with: task_input, expected_behavior, difficulty, category")
@@ -116,6 +129,7 @@ class SyntheticDatasetBuilder:
         self,
         artifact_text: str,
         artifact_type: str = "skill",
+        reference_context: str = "",
         num_cases: Optional[int] = None,
     ) -> EvalDataset:
         """Generate a full eval dataset with train/val/holdout splits."""
@@ -128,6 +142,7 @@ class SyntheticDatasetBuilder:
         with dspy.context(lm=lm, adapter=dspy.ChatAdapter()):
             result = self.generator(
                 artifact_text=artifact_text,
+                reference_context=reference_context,
                 artifact_type=artifact_type,
                 num_cases=n,
             )

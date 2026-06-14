@@ -27,6 +27,9 @@ class EvolutionConfig:
     max_tool_desc_size: int = 500  # chars
     max_param_desc_size: int = 200  # chars
     max_prompt_growth: float = 0.2  # 20% max growth over baseline
+    max_prompt_shrink: float = 0.3  # 30% max shrinkage from baseline
+    min_heading_retention: float = 0.7  # Preserve 70% of baseline markdown headings
+    skill_context_budget: int = 20_000  # Max chars of read-only referenced file context
 
     # Eval dataset
     eval_dataset_size: int = 20  # Total examples to generate

@@ -5,6 +5,7 @@ Supports length penalties and multi-dimensional scoring.
 """
 
 import dspy
+import re
 from dataclasses import dataclass
 from typing import Optional
 
@@ -121,25 +122,54 @@ def skill_fitness_metric(
     expected = getattr(example, "expected_behavior", "") or ""
     task = getattr(example, "task_input", "") or ""
 
-    if not agent_output.strip():
+    output_text = agent_output.strip()
+    if not output_text:
         return 0.0
 
     # Quick heuristic scoring (for speed during optimization)
     # Full LLM-as-judge scoring is expensive — use it selectively
-    score = 0.5  # Base score for non-empty output
+    score = 0.4  # Base score for non-empty output
 
     # Check if key phrases from expected behavior appear
     expected_lower = expected.lower()
     output_lower = agent_output.lower()
 
     # Simple keyword overlap as a fast proxy
-    expected_words = set(expected_lower.split())
-    output_words = set(output_lower.split())
+    expected_words = _content_words(expected_lower)
+    output_words = _content_words(output_lower)
     if expected_words:
         overlap = len(expected_words & output_words) / len(expected_words)
-        score = 0.3 + (0.7 * overlap)
+        score = 0.25 + (0.75 * overlap)
+
+    if _looks_generic(output_lower):
+        score *= 0.75
+
+    if len(output_text) < 80 and len(expected_words) > 20:
+        score *= 0.8
 
     return min(1.0, max(0.0, score))
+
+
+def _content_words(text: str) -> set[str]:
+    stopwords = {
+        "the", "and", "for", "that", "with", "this", "from", "should", "must",
+        "will", "are", "was", "were", "you", "your", "into", "about", "what",
+        "when", "where", "which", "while", "also", "have", "has", "had",
+    }
+    words = re.findall(r"[a-z0-9][a-z0-9_-]{2,}", text)
+    return {word for word in words if word not in stopwords}
+
+
+def _looks_generic(text: str) -> bool:
+    generic_phrases = [
+        "it depends",
+        "best practices",
+        "step-by-step",
+        "clear and concise",
+        "consider the context",
+        "tailor the response",
+    ]
+    return any(phrase in text for phrase in generic_phrases)
 
 
 def _parse_score(value) -> float:

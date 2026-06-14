@@ -2,7 +2,13 @@
 
 import pytest
 from pathlib import Path
-from evolution.skills.skill_module import load_skill, reassemble_skill
+from evolution.skills.skill_module import (
+    SkillModule,
+    discover_reference_files,
+    load_skill,
+    load_skill_bundle,
+    reassemble_skill,
+)
 
 
 SAMPLE_SKILL = """---
@@ -90,3 +96,84 @@ class TestReassembleSkill:
 
         assert "EVOLVED" in result
         assert "New and improved" in result
+
+
+class TestLoadSkillBundle:
+    def test_discovers_safe_reference_context(self, tmp_path):
+        skill_dir = tmp_path / "my-skill"
+        refs = skill_dir / "references"
+        templates = skill_dir / "templates"
+        refs.mkdir(parents=True)
+        templates.mkdir()
+        (refs / "playbook.md").write_text("# Playbook\nReference doctrine")
+        (templates / "output.md").write_text("# Output\nTemplate")
+        (skill_dir / "SPEC.md").write_text("# Spec\nDetails")
+        (skill_dir / "notes.md").write_text("# Notes\nNearby markdown")
+        (skill_dir / "script.py").write_text("print('ignore')")
+        (skill_dir / ".DS_Store").write_text("ignore")
+        (skill_dir / "SKILL.md").write_text(
+            "---\nname: my-skill\ndescription: Test\n---\n\n"
+            "# My Skill\nSee [playbook](references/playbook.md)."
+        )
+
+        bundle = load_skill_bundle(skill_dir / "SKILL.md")
+
+        relative_files = [path.relative_to(skill_dir) for path in bundle.reference_files]
+        assert relative_files == [
+            Path("references/playbook.md"),
+            Path("templates/output.md"),
+            Path("SPEC.md"),
+            Path("notes.md"),
+        ]
+        assert "Reference: references/playbook.md" in bundle.reference_context
+        assert "Reference doctrine" in bundle.reference_context
+        assert "script.py" not in bundle.reference_context
+
+    def test_no_references_returns_empty_context(self, tmp_path):
+        skill_dir = tmp_path / "my-skill"
+        skill_dir.mkdir()
+        skill_path = skill_dir / "SKILL.md"
+        skill_path.write_text(SAMPLE_SKILL)
+
+        bundle = load_skill_bundle(skill_path)
+
+        assert bundle.reference_files == []
+        assert bundle.reference_context == ""
+
+    def test_context_budget_uses_excerpt(self, tmp_path):
+        skill_dir = tmp_path / "my-skill"
+        refs = skill_dir / "references"
+        refs.mkdir(parents=True)
+        skill_path = skill_dir / "SKILL.md"
+        skill_path.write_text(SAMPLE_SKILL)
+        (refs / "long.md").write_text("# Important\n" + ("long text\n" * 200))
+
+        bundle = load_skill_bundle(skill_path, context_budget=120)
+
+        assert "Reference: references/long.md" in bundle.reference_context
+        assert len(bundle.reference_context) <= 120
+
+    def test_discovers_explicit_references_before_directory_files(self, tmp_path):
+        skill_dir = tmp_path / "my-skill"
+        refs = skill_dir / "references"
+        refs.mkdir(parents=True)
+        skill_path = skill_dir / "SKILL.md"
+        skill_path.write_text(
+            "---\nname: my-skill\ndescription: Test\n---\n\n"
+            "Read [second](references/second.md)."
+        )
+        (refs / "first.md").write_text("# First")
+        (refs / "second.md").write_text("# Second")
+
+        files = discover_reference_files(skill_path, skill_path.read_text())
+
+        assert [path.name for path in files] == ["second.md", "first.md"]
+
+
+class TestSkillModule:
+    def test_skill_text_excludes_read_only_reference_context(self):
+        module = SkillModule("# Mutable Skill", reference_context="# Reference")
+
+        assert module.skill_text == "# Mutable Skill"
+        assert "reference_context" in module.predictor.predict.signature.input_fields
+        assert module.reference_context == "# Reference"

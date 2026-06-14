@@ -25,7 +25,7 @@ from evolution.core.fitness import skill_fitness_metric, LLMJudge, FitnessScore
 from evolution.core.constraints import ConstraintValidator
 from evolution.skills.skill_module import (
     SkillModule,
-    load_skill,
+    load_skill_bundle,
     find_skill,
     reassemble_skill,
 )
@@ -42,6 +42,10 @@ def evolve(
     eval_model: str = "openai/gpt-4.1-mini",
     hermes_repo: Optional[str] = None,
     max_skill_size: Optional[int] = None,
+    max_prompt_growth: Optional[float] = None,
+    max_prompt_shrink: Optional[float] = None,
+    min_heading_retention: Optional[float] = None,
+    skill_context_budget: Optional[int] = None,
     run_tests: bool = False,
     dry_run: bool = False,
 ):
@@ -56,6 +60,14 @@ def evolve(
     )
     if max_skill_size is not None:
         config.max_skill_size = max_skill_size
+    if max_prompt_growth is not None:
+        config.max_prompt_growth = max_prompt_growth
+    if max_prompt_shrink is not None:
+        config.max_prompt_shrink = max_prompt_shrink
+    if min_heading_retention is not None:
+        config.min_heading_retention = min_heading_retention
+    if skill_context_budget is not None:
+        config.skill_context_budget = skill_context_budget
     if hermes_repo:
         config.hermes_agent_path = Path(hermes_repo)
 
@@ -67,11 +79,13 @@ def evolve(
         console.print(f"[red]✗ Skill '{skill_name}' not found in {config.hermes_agent_path / 'skills'}[/red]")
         sys.exit(1)
 
-    skill = load_skill(skill_path)
+    bundle = load_skill_bundle(skill_path, context_budget=config.skill_context_budget)
+    skill = bundle.skill
     console.print(f"  Loaded: {skill_path.relative_to(config.hermes_agent_path)}")
     console.print(f"  Name: {skill['name']}")
     console.print(f"  Size: {len(skill['raw']):,} chars")
     console.print(f"  Description: {skill['description'][:80]}...")
+    console.print(f"  Reference files: {len(bundle.reference_files)} ({len(bundle.reference_context):,} context chars)")
 
     if dry_run:
         console.print(f"\n[bold green]DRY RUN — setup validated successfully.[/bold green]")
@@ -90,7 +104,7 @@ def evolve(
         save_path = Path(dataset_path) if dataset_path else Path("datasets") / "skills" / skill_name
         dataset = build_dataset_from_external(
             skill_name=skill_name,
-            skill_text=skill["raw"],
+            skill_text=_skill_text_with_reference_context(skill["raw"], bundle.reference_context),
             sources=["claude-code", "copilot", "hermes"],
             output_path=save_path,
             model=eval_model,
@@ -104,6 +118,7 @@ def evolve(
         dataset = builder.generate(
             artifact_text=skill["raw"],
             artifact_type="skill",
+            reference_context=bundle.reference_context,
         )
         # Save for reuse
         save_path = Path("datasets") / "skills" / skill_name
@@ -146,7 +161,7 @@ def evolve(
     dspy.configure(lm=lm, adapter=dspy.ChatAdapter())
 
     # Create the baseline skill module
-    baseline_module = SkillModule(skill["body"])
+    baseline_module = SkillModule(skill["body"], reference_context=bundle.reference_context)
 
     # Prepare DSPy examples
     trainset = dataset.to_dspy_examples("train")
@@ -285,6 +300,8 @@ def evolve(
         "holdout_examples": len(dataset.holdout),
         "elapsed_seconds": elapsed,
         "constraints_passed": all_pass,
+        "reference_files": [str(path.relative_to(bundle.skill_dir)) for path in bundle.reference_files],
+        "reference_context_size": len(bundle.reference_context),
     }
     (output_dir / "metrics.json").write_text(json.dumps(metrics, indent=2))
 
@@ -313,9 +330,33 @@ def evolve(
     type=int,
     help="Maximum allowed full SKILL.md size in characters",
 )
+@click.option(
+    "--max-prompt-growth",
+    default=None,
+    type=float,
+    help="Maximum allowed growth over baseline, as a fraction",
+)
+@click.option(
+    "--max-prompt-shrink",
+    default=None,
+    type=float,
+    help="Maximum allowed shrinkage from baseline, as a fraction",
+)
+@click.option(
+    "--min-heading-retention",
+    default=None,
+    type=float,
+    help="Minimum fraction of baseline markdown headings to preserve",
+)
+@click.option(
+    "--skill-context-budget",
+    default=None,
+    type=int,
+    help="Maximum referenced-file context characters to include",
+)
 @click.option("--run-tests", is_flag=True, help="Run full pytest suite as constraint gate")
 @click.option("--dry-run", is_flag=True, help="Validate setup without running optimization")
-def main(skill, iterations, eval_source, dataset_path, optimizer_model, eval_model, hermes_repo, max_skill_size, run_tests, dry_run):
+def main(skill, iterations, eval_source, dataset_path, optimizer_model, eval_model, hermes_repo, max_skill_size, max_prompt_growth, max_prompt_shrink, min_heading_retention, skill_context_budget, run_tests, dry_run):
     """Evolve a Hermes Agent skill using DSPy + GEPA optimization."""
     evolve(
         skill_name=skill,
@@ -326,8 +367,24 @@ def main(skill, iterations, eval_source, dataset_path, optimizer_model, eval_mod
         eval_model=eval_model,
         hermes_repo=hermes_repo,
         max_skill_size=max_skill_size,
+        max_prompt_growth=max_prompt_growth,
+        max_prompt_shrink=max_prompt_shrink,
+        min_heading_retention=min_heading_retention,
+        skill_context_budget=skill_context_budget,
         run_tests=run_tests,
         dry_run=dry_run,
+    )
+
+
+def _skill_text_with_reference_context(skill_text: str, reference_context: str) -> str:
+    if not reference_context:
+        return skill_text
+    return (
+        f"{skill_text}\n\n"
+        "## Read-only referenced file context\n"
+        "The following local files support this skill. Use them to judge relevance, "
+        "but do not treat them as part of the mutable SKILL.md body.\n\n"
+        f"{reference_context}"
     )
 
 
