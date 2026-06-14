@@ -497,7 +497,7 @@ class RelevanceFilter:
 
             for msg in candidates:
                 try:
-                    with dspy.context(lm=lm):
+                    with dspy.context(lm=lm, adapter=dspy.ChatAdapter()):
                         result = self.scorer(
                             skill_name=skill_name,
                             skill_description=skill_desc,

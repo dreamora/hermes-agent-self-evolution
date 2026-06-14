@@ -74,7 +74,7 @@ class LLMJudge:
 
         lm = dspy.LM(self.config.eval_model)
 
-        with dspy.context(lm=lm):
+        with dspy.context(lm=lm, adapter=dspy.ChatAdapter()):
             result = self.judge(
                 task_input=task_input,
                 expected_behavior=expected_behavior,
@@ -104,7 +104,13 @@ class LLMJudge:
         )
 
 
-def skill_fitness_metric(example: dspy.Example, prediction: dspy.Prediction, trace=None) -> float:
+def skill_fitness_metric(
+    example: dspy.Example,
+    prediction: dspy.Prediction,
+    trace=None,
+    pred_name=None,
+    pred_trace=None,
+) -> float:
     """DSPy-compatible metric function for skill optimization.
 
     This is what gets passed to dspy.GEPA(metric=...).

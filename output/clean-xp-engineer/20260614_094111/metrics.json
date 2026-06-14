@@ -1,0 +1,17 @@
+{
+  "skill_name": "clean-xp-engineer",
+  "timestamp": "20260614_094111",
+  "iterations": 1,
+  "optimizer_model": "openai/gpt-5.5",
+  "eval_model": "openai/gpt-5.4-mini",
+  "baseline_score": 0.4883216783216783,
+  "evolved_score": 0.48762820512820515,
+  "improvement": -0.0006934731934731264,
+  "baseline_size": 6708,
+  "evolved_size": 6708,
+  "train_examples": 10,
+  "val_examples": 5,
+  "holdout_examples": 5,
+  "elapsed_seconds": 17.736474990844727,
+  "constraints_passed": true
+}

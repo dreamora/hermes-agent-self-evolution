@@ -41,6 +41,7 @@ def evolve(
     optimizer_model: str = "openai/gpt-4.1",
     eval_model: str = "openai/gpt-4.1-mini",
     hermes_repo: Optional[str] = None,
+    max_skill_size: Optional[int] = None,
     run_tests: bool = False,
     dry_run: bool = False,
 ):
@@ -53,6 +54,8 @@ def evolve(
         judge_model=eval_model,  # Use same model for dataset generation
         run_pytest=run_tests,
     )
+    if max_skill_size is not None:
+        config.max_skill_size = max_skill_size
     if hermes_repo:
         config.hermes_agent_path = Path(hermes_repo)
 
@@ -73,7 +76,7 @@ def evolve(
     if dry_run:
         console.print(f"\n[bold green]DRY RUN — setup validated successfully.[/bold green]")
         console.print(f"  Would generate eval dataset (source: {eval_source})")
-        console.print(f"  Would run GEPA optimization ({iterations} iterations)")
+        console.print(f"  Would run GEPA optimization ({iterations} full eval budget)")
         console.print(f"  Would validate constraints and create PR")
         return
 
@@ -119,7 +122,7 @@ def evolve(
     # ── 3. Validate constraints on baseline ─────────────────────────────
     console.print(f"\n[bold]Validating baseline constraints[/bold]")
     validator = ConstraintValidator(config)
-    baseline_constraints = validator.validate_all(skill["body"], "skill")
+    baseline_constraints = validator.validate_all(skill["raw"], "skill")
     all_pass = True
     for c in baseline_constraints:
         icon = "✓" if c.passed else "✗"
@@ -133,13 +136,14 @@ def evolve(
 
     # ── 4. Set up DSPy + GEPA optimizer ─────────────────────────────────
     console.print(f"\n[bold]Configuring optimizer[/bold]")
-    console.print(f"  Optimizer: GEPA ({iterations} iterations)")
+    console.print(f"  Optimizer: GEPA ({iterations} full eval budget)")
     console.print(f"  Optimizer model: {optimizer_model}")
     console.print(f"  Eval model: {eval_model}")
 
     # Configure DSPy
     lm = dspy.LM(eval_model)
-    dspy.configure(lm=lm)
+    reflection_lm = dspy.LM(optimizer_model)
+    dspy.configure(lm=lm, adapter=dspy.ChatAdapter())
 
     # Create the baseline skill module
     baseline_module = SkillModule(skill["body"])
@@ -149,14 +153,15 @@ def evolve(
     valset = dataset.to_dspy_examples("val")
 
     # ── 5. Run GEPA optimization ────────────────────────────────────────
-    console.print(f"\n[bold cyan]Running GEPA optimization ({iterations} iterations)...[/bold cyan]\n")
+    console.print(f"\n[bold cyan]Running GEPA optimization ({iterations} full eval budget)...[/bold cyan]\n")
 
     start_time = time.time()
 
-    try:
+    if hasattr(dspy, "GEPA"):
         optimizer = dspy.GEPA(
             metric=skill_fitness_metric,
-            max_steps=iterations,
+            max_full_evals=iterations,
+            reflection_lm=reflection_lm,
         )
 
         optimized_module = optimizer.compile(
@@ -164,9 +169,9 @@ def evolve(
             trainset=trainset,
             valset=valset,
         )
-    except Exception as e:
-        # Fall back to MIPROv2 if GEPA isn't available in this DSPy version
-        console.print(f"[yellow]GEPA not available ({e}), falling back to MIPROv2[/yellow]")
+    else:
+        # Fall back to MIPROv2 if GEPA isn't available in this DSPy version.
+        console.print("[yellow]GEPA not available in this DSPy version, falling back to MIPROv2[/yellow]")
         optimizer = dspy.MIPROv2(
             metric=skill_fitness_metric,
             auto="light",
@@ -186,7 +191,7 @@ def evolve(
 
     # ── 7. Validate evolved skill ───────────────────────────────────────
     console.print(f"\n[bold]Validating evolved skill[/bold]")
-    evolved_constraints = validator.validate_all(evolved_body, "skill", baseline_text=skill["body"])
+    evolved_constraints = validator.validate_all(evolved_full, "skill", baseline_text=skill["raw"])
     all_pass = True
     for c in evolved_constraints:
         icon = "✓" if c.passed else "✗"
@@ -213,7 +218,7 @@ def evolve(
     evolved_scores = []
     for ex in holdout_examples:
         # Score baseline
-        with dspy.context(lm=lm):
+        with dspy.context(lm=lm, adapter=dspy.ChatAdapter()):
             baseline_pred = baseline_module(task_input=ex.task_input)
             baseline_score = skill_fitness_metric(ex, baseline_pred)
             baseline_scores.append(baseline_score)
@@ -247,7 +252,7 @@ def evolve(
         f"{len(evolved_body) - len(skill['body']):+,} chars",
     )
     table.add_row("Time", "", f"{elapsed:.1f}s", "")
-    table.add_row("Iterations", "", str(iterations), "")
+    table.add_row("Full eval budget", "", str(iterations), "")
 
     console.print()
     console.print(table)
@@ -295,16 +300,22 @@ def evolve(
 
 @click.command()
 @click.option("--skill", required=True, help="Name of the skill to evolve")
-@click.option("--iterations", default=10, help="Number of GEPA iterations")
+@click.option("--iterations", default=10, help="GEPA full evaluation budget")
 @click.option("--eval-source", default="synthetic", type=click.Choice(["synthetic", "golden", "sessiondb"]),
               help="Source for evaluation dataset")
 @click.option("--dataset-path", default=None, help="Path to existing eval dataset (JSONL)")
 @click.option("--optimizer-model", default="openai/gpt-4.1", help="Model for GEPA reflections")
 @click.option("--eval-model", default="openai/gpt-4.1-mini", help="Model for evaluations")
 @click.option("--hermes-repo", default=None, help="Path to hermes-agent repo")
+@click.option(
+    "--max-skill-size",
+    default=None,
+    type=int,
+    help="Maximum allowed full SKILL.md size in characters",
+)
 @click.option("--run-tests", is_flag=True, help="Run full pytest suite as constraint gate")
 @click.option("--dry-run", is_flag=True, help="Validate setup without running optimization")
-def main(skill, iterations, eval_source, dataset_path, optimizer_model, eval_model, hermes_repo, run_tests, dry_run):
+def main(skill, iterations, eval_source, dataset_path, optimizer_model, eval_model, hermes_repo, max_skill_size, run_tests, dry_run):
     """Evolve a Hermes Agent skill using DSPy + GEPA optimization."""
     evolve(
         skill_name=skill,
@@ -314,6 +325,7 @@ def main(skill, iterations, eval_source, dataset_path, optimizer_model, eval_mod
         optimizer_model=optimizer_model,
         eval_model=eval_model,
         hermes_repo=hermes_repo,
+        max_skill_size=max_skill_size,
         run_tests=run_tests,
         dry_run=dry_run,
     )

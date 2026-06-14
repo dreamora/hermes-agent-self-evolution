@@ -91,24 +91,21 @@ class SkillModule(dspy.Module):
     3. Returns the agent's response
     """
 
-    class TaskWithSkill(dspy.Signature):
-        """Complete a task following the provided skill instructions.
-
-        You are an AI agent following specific skill instructions to complete a task.
-        Read the skill instructions carefully and follow the procedure described.
-        """
-        skill_instructions: str = dspy.InputField(desc="The skill instructions to follow")
-        task_input: str = dspy.InputField(desc="The task to complete")
-        output: str = dspy.OutputField(desc="Your response following the skill instructions")
-
     def __init__(self, skill_text: str):
         super().__init__()
-        self.skill_text = skill_text
-        self.predictor = dspy.ChainOfThought(self.TaskWithSkill)
+        signature = dspy.Signature("task_input -> output", skill_text)
+        self.predictor = dspy.ChainOfThought(signature)
+
+    @property
+    def skill_text(self) -> str:
+        return self.predictor.predict.signature.instructions
+
+    @skill_text.setter
+    def skill_text(self, value: str) -> None:
+        self.predictor.predict.signature = self.predictor.predict.signature.with_instructions(value)
 
     def forward(self, task_input: str) -> dspy.Prediction:
         result = self.predictor(
-            skill_instructions=self.skill_text,
             task_input=task_input,
         )
         return dspy.Prediction(output=result.output)

@@ -1,0 +1,17 @@
+{
+  "skill_name": "marc-morning-briefing",
+  "timestamp": "20260614_103454",
+  "iterations": 5,
+  "optimizer_model": "openai/gpt-5.5",
+  "eval_model": "openai/gpt-5.4-mini",
+  "baseline_score": 0.41616017797552834,
+  "evolved_score": 0.33992436040044494,
+  "improvement": -0.07623581757508341,
+  "baseline_size": 4241,
+  "evolved_size": 4241,
+  "train_examples": 10,
+  "val_examples": 5,
+  "holdout_examples": 5,
+  "elapsed_seconds": 823.5812621116638,
+  "constraints_passed": true
+}

@@ -18,6 +18,7 @@ datasets/**/*.json
 # Evolution snapshots
 snapshots/
 *.pkl
+.cache/
 
 # IDE
 .idea/

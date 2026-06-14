@@ -125,7 +125,7 @@ class SyntheticDatasetBuilder:
         # Configure DSPy to use the judge model for generation
         lm = dspy.LM(self.config.judge_model)
 
-        with dspy.context(lm=lm):
+        with dspy.context(lm=lm, adapter=dspy.ChatAdapter()):
             result = self.generator(
                 artifact_text=artifact_text,
                 artifact_type=artifact_type,
