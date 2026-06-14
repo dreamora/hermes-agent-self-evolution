@@ -10,6 +10,8 @@ build/
 venv/
 .env
 
+output/
+
 # Generated eval datasets (local, not shared)
 datasets/**/*.jsonl
 datasets/**/*.json
@@ -25,3 +27,31 @@ snapshots/
 .vscode/
 *.swp
 *.swo
+
+# BEGIN idream-managed agent workspace
+# local files and generated output
+.env
+.env.*
+!.env.example
+*.log
+*.tmp
+*.bak
+.cache/
+tmp/
+coverage/
+dist/
+ai-setup-backup-*.tar.gz
+.backup/*
+!.backup/
+!.backup/README.md
+
+# agent/runtime workspace
+.serena/
+.state/
+.worktrees/
+
+# framework-local state roots
+.compound-engineering/
+.sisyphus/
+.planning/
+# END idream-managed agent workspace
